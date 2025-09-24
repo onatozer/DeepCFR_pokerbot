@@ -1,68 +1,33 @@
-import sys
-
 from typing import List, cast, Dict, NewType
 import numpy as np
-import torch
-from config import *
 
 
-
-
-
-'''
-Args:
-    observation (dict): The observation of the current state.
-    {
-        "legal_actions": List of the Actions that are legal to take.    N
-        "street": 0, 1, or 2 representing pre-flop, flop, or river respectively    Y
-        "my_cards": List[str] of your cards, e.g. ["1s", "2h"]      Y
-        "board_cards": List[str] of the cards on the board         Y
-
-        "my_pip": int, the number of chips you have contributed to the pot this round of betting            Y
-        "opp_pip": int, the number of chips your opponent has contributed to the pot this round of betting      Y
-
-        "my_stack": int, the number of chips you have remaining     Y
-        "opp_stack": int, the number of chips your opponent has remaining       Y (might not be needed as information is already encoded in mystack - 2p zero sum)
-
-        "my_bankroll": int, the number of chips you have won or lost from the beginning of the game to the start of this round      N
-
-        "min_raise": int, the smallest number of chips for a legal bet/raise        N
-        "max_raise": int, the largest number of chips for a legal bet/raise         N
-    }
-
-    info set key format:
-    str(observation["street"]) + ''.join(observation["my_cards"]) + ''.join(observation["board_cards"]) + str(observation["my_stack"]) + str(observation["opp_stack"]) 
-
-    Inputs for nn:
-    
-'''
-
+Player = NewType('Player', int)
+Action = NewType('Action', int)
 
 class InfoSet:
     """
     Information Set I_i
     """
 
-    def __init__(self, key, legal_actions: List[int]):
+    def __init__(self, key: bytes, legal_actions: List[Action]):
         """
         Initialize the InfoSet with a key and the legal actions available at this state.
         """
         self.key = key
         self.legal_actions = legal_actions
-
-        self.regret = {a: 0.0 for a in self.legal_actions}
-        self.cumulative_strategy = {a: 0.0 for a in self.legal_actions}
+        self.regret = {a: 0.0 for a in legal_actions}
+        self.cumulative_strategy = {a: 0.0 for a in legal_actions}
         self.strategy = {}
         self.calculate_strategy()
 
-
-    #TODO: Will need to change for poker env with continous raise amount
-    def actions(self) -> List[int]:
+    def actions(self) -> List[Action]:
         """
         Return the list of legal actions.
         """
         return self.legal_actions
 
+    #TODO: Implement this function
     def calculate_strategy(self):
         """
         Calculate current strategy using regret matching.
@@ -78,16 +43,17 @@ class InfoSet:
 
         else:
             for action, regret in self.regret.items():
-                self.strategy[action] = max(regret, 0) / sum_regrets
+                self.strategy[action] = max(regret, 0) /sum_regrets
+        
 
+    #TODO: Implement this function
     def get_average_strategy(self):
         """
         Get average strategy based on cumulative strategy.
         """
         strategy_sum = sum(self.cumulative_strategy.values())
 
-        avg_strategy = {a: self.cumulative_strategy.get(
-            a, 0.) for a in self.actions()}
+        avg_strategy = {a: self.cumulative_strategy.get(a,0.) for a in self.actions()}
 
         for action in self.legal_actions:
             avg_strategy[action] = self.cumulative_strategy[action]/strategy_sum
@@ -96,45 +62,35 @@ class InfoSet:
 
 
 
-    #TODO: This also needs to change for openSpiel (I basically changed nothing, but should work fine)
-    def convert_key_to_tensor(self):
-        '''
-        key:
-            hole_cards + board_cards + bet_features
-        '''
-
-        # One numpy array
-        key = self.key
-
-        key = np.frombuffer(key, dtype=np.int32)
-
-
-        hole_cards = key[:2]
-
-
-        board_cards = key[2:7]
         
-        card_tensor = [
-            torch.tensor(np.array(hole_cards).reshape(1, -1)).to(DEVICE), #preflop
-            torch.tensor(np.array(board_cards[0:3]).reshape(1, -1)).to(DEVICE), #flop
-            torch.tensor(np.array(board_cards[3:4]).reshape(1, -1)).to(DEVICE), #turn
-            torch.tensor(np.array(board_cards[4:5]).reshape(1, -1)).to(DEVICE), #river
-        ]
 
+    def to_dict(self):
         """
-        cards = [
-            # Hole cards for datapoint 1 and datapoint 2 (2 cards each) card round 1
-            torch.tensor([[3, 12]]),
-            # Board 1 cards for datapoint 1 and datapoint 2 (1 card each) card round 2
-            torch.tensor([[10]]),
-            # Board 2 cards for datapoint 1 and datapoint 2 (1 card each) card round 3, -1 if card round not reached
-            torch.tensor([[11]])
-        ]"""
+        Save the information set to a dictionary.
+        """
+        return {
+            'key': self.key,
+            'regret': self.regret,
+            'average_strategy': self.cumulative_strategy,
+        }
 
-        # print(f"key {key}")
-        bet_features = key[7:]
-        bet_tensor = torch.tensor(bet_features.reshape(1, -1)).float()
+    def load_dict(self, data: Dict[tuple, any]):
+        """
+        Load data from a saved dictionary.
+        """
+        self.regret = data['regret']
+        self.cumulative_strategy = data['average_strategy']
+        self.calculate_strategy()
 
-        # print(f"returning card tensor {card_tensor}\nand returning bet tensor {bet_tensor}")
-        return card_tensor, bet_tensor.to(DEVICE)
+    def __repr__(self):
+        """
+        Human-readable string representation of the InfoSet.
+        """
+        total = sum(self.cumulative_strategy.values())
+        if total > 0:
+            strategy = {a: self.cumulative_strategy[a] / total for a in self.legal_actions}
+        else:
+            count = len(self.legal_actions)
+            strategy = {a: 1.0 / count for a in self.legal_actions}
+        return f'InfoSet(key={self.key}, strategy={strategy})'
 
