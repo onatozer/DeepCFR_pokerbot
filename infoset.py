@@ -19,6 +19,8 @@ class InfoSet:
         self.regret = {a: 0.0 for a in legal_actions}
         self.cumulative_strategy = {a: 0.0 for a in legal_actions}
         self.strategy = {}
+
+        #Doing this to populate strategy with default value
         self.calculate_strategy()
 
     def actions(self) -> List[Action]:
@@ -44,19 +46,22 @@ class InfoSet:
         else:
             for action, regret in self.regret.items():
                 self.strategy[action] = max(regret, 0) /sum_regrets
+
+        # for action in self.cumulative_strategy:
+        #     self.cumulative_strategy[action] += self.strategy.get(action, 0)
         
 
-    #TODO: Implement this function
     def get_average_strategy(self):
         """
         Get average strategy based on cumulative strategy.
         """
         strategy_sum = sum(self.cumulative_strategy.values())
+        # print(strategy_sum)
 
         avg_strategy = {a: self.cumulative_strategy.get(a,0.) for a in self.actions()}
 
         for action in self.legal_actions:
-            avg_strategy[action] = self.cumulative_strategy[action]/strategy_sum
+            avg_strategy[action] = self.cumulative_strategy[action]/(strategy_sum +1)
 
         return avg_strategy
 

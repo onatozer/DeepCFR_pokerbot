@@ -8,12 +8,13 @@ from human_player import Human_Player
 
 import numpy as np
 
-class Game_wrapper:
-    def __init__(self, game, agent1, agent2):
+class GameWrapper:
+    def __init__(self, game, agent1, agent2, verbose: bool = True):
         self.game = game
         self.agent1 = agent1
         self.agent2 = agent2
-        self.total_winings = [0,0]
+        self.total_winnings = [0,0]
+        self.verbose = verbose
 
         self.state = game.new_initial_state()
 
@@ -27,18 +28,22 @@ class Game_wrapper:
 
             elif(self.state.current_player() == 0):
                 action = self.agent1.take_action(self.state)
-                print(action)
+                if self.verbose: print(action)
                 self.state = self.state.child(action)
             else:
                 self.state = self.state.child(self.agent2.take_action(self.state))
 
-        print(f"Hand ended at state: \n {self.state}")
-        self.total_winings = [self.total_winings[i] + self.state.returns()[i] for i in range(2)]
-        print(f"Winnings for that hand are {self.state.returns()}")
-        print(f"Total winnings are {self.total_winings}")
-        print("Press any key to continue")
+        if self.verbose: print(f"Hand ended at state: \n {self.state}")
+
+        self.total_winnings = [self.total_winnings[i] + self.state.returns()[i] for i in range(2)]
+
+        if self.verbose: print(f"Winnings for that hand are {self.state.returns()}")
+        if self.verbose: print(f"Total winnings are {self.total_winnings}")
+        if self.verbose: print("Press any key to continue")
+
         self.state = self.game.new_initial_state()
-        input()
+
+        if self.verbose: input()
 
 
 def main(args):
@@ -64,7 +69,7 @@ END GAMEDEF
     pokerbot= CFR(game=game)
     pokerbot.load(args.opponent_model)
 
-    poker = Game_wrapper(game=game, agent1=human, agent2=pokerbot)
+    poker = GameWrapper(game=game, agent1=human, agent2=pokerbot)
 
     for i in range(args.num_hands):
         poker.run()

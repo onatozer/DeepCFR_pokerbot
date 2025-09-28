@@ -11,7 +11,8 @@ import pyspiel
 
 class CFR:
    
-    def __init__(self):
+    def __init__(self, game):
+        self.game = game
         self.info_sets = {}
 
     def get_info_set_key(self, state: pyspiel.State, current_player):
@@ -39,8 +40,9 @@ class CFR:
 
     def walk_tree(self, state: pyspiel.State, i: Player, pi_i: float, pi_neg_i: float) -> float:
         #player 1 ->index 0, player 2 -> index 1
-        if self.env.is_terminal():
-            return self.env.returns()[i]
+        if state.is_terminal():
+            # Terminal state get returns.
+            return state.returns()[i]
         
 
         elif state.is_chance_node():
@@ -48,7 +50,7 @@ class CFR:
             # Have to do this now cause we're not using the gym environment
             chance_outcome, chance_proba = zip(*state.chance_outcomes())
             action = np.random.choice(chance_outcome, p=chance_proba)
-            return self.traverse(state.child(action), i, pi_i, pi_neg_i)
+            return self.walk_tree(state.child(action), i, pi_i, pi_neg_i)
         
 
 
@@ -61,11 +63,11 @@ class CFR:
 
         v_sigma = 0
         v_a = {}
-
+        
 
         for action in I.actions():
 
-            if self.env.get_player_id() == i:
+            if current_player == i:
                 v_a[action] = self.walk_tree(state.child(action), i, pi_i * I.strategy[action], pi_neg_i)
 
             else:
@@ -80,20 +82,29 @@ class CFR:
                 I.cumulative_strategy[action] += pi_i*I.strategy[action]
 
             
-        I.calculate_strategy()
+            I.calculate_strategy()
         
         return v_sigma
-
     
-    def eval_step(self, state):
-        edited_state = self._state_abstraction(state)
-        legal_actions = list(state['legal_actions'].keys())
 
-        if edited_state not in self.info_sets:
+
+    def take_action(self,state):
+        '''
+        Helper function I'm writing so that the agent can interface with the game_wrapper class
+
+        Args: 
+            state: (pyspiel.State)
+        Returns:
+            some action samples from the possible states
+        '''
+        key = self.get_info_set_key(state, state.current_player())
+        legal_actions = state.legal_actions()
+
+        if key not in self.info_sets:
             # Assign uniform probabilities if the info set is not found
             action_probs = [1.0 / len(legal_actions) for _ in legal_actions]
         else:
-            info_set = self.info_sets[edited_state]
+            info_set = self.info_sets[key]
             average_strategy = info_set.get_average_strategy()
             # Get probabilities for legal actions
             action_probs = [average_strategy.get(a, 0.0) for a in legal_actions]
@@ -108,23 +119,19 @@ class CFR:
 
         # Now, action_probs should sum to 1
         action = np.random.choice(legal_actions, p=action_probs)
-        return action, action_probs
+        return action
 
 
     
     #Ok, I think we did it, can come back later for some better information logging
-    def train(self, epochs = 1):
-        """
-        ### Iteratively update $\textcolor{lightgreen}{\sigma^t(I)(a)}$
+    def train(self, iterations = 1):
 
-        This updates the strategies for $T$ iterations.
-        """
-
-        # Loop for `epochs` times
-        for t in range(epochs):
-            for i in range(self.n_players):
-                self.env.reset()
-                self.walk_tree(cast(Player, i), 1, 1)     
+        # Loop for `iterations` times
+        for t in range(iterations):
+            #We're only really ever doing this for 2 players
+            initial_state = self.game.new_initial_state()
+            for i in range(2):
+                self.walk_tree(initial_state, cast(Player, i), 1, 1)     
 
         #     # Save checkpoints every $1,000$ iterations
         #     if (t + 1) % 1_000 == 0:
@@ -136,22 +143,18 @@ class CFR:
     def save(self, model_path = './cfr_model'):
         ''' Save model
         '''
-        if not os.path.exists(model_path):
-            os.makedirs(model_path)
+        with open(model_path, "wb") as f:
+            pickle.dump(self.info_sets, f)
 
-        cfr_policy = open(os.path.join(model_path, 'policy.pkl'),'wb')
-        pickle.dump(self.info_sets, cfr_policy)
-        cfr_policy.close()
+        f.close()
 
     def load(self, model_path = './cfr_model'):
         ''' Load model
         '''
-        if not os.path.exists(model_path):
-            print(f'No model found at {model_path}')
-            return
 
-        policy_file = open(os.path.join(model_path, 'policy.pkl'),'rb')
-        self.info_sets = pickle.load(policy_file)
+        with open(model_path, "rb") as policy_file:
+            self.info_sets = pickle.load(policy_file)
+        
         policy_file.close()
 
        

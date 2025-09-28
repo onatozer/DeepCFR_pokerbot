@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 from typing import cast, List, Tuple
-from infoset import InfoSet
+from deep_infoset import DeepInfoSet
 import os
 import re
 import pyspiel
@@ -20,14 +20,14 @@ from torch.cuda.amp import GradScaler, autocast
 
 
 
-class CFR(policy.Policy):
+class DeepCFR(policy.Policy):
 
     def __init__(self, *,
                  n_players: int = 2,
                  game
                  ):
         all_players = list(range(game.num_players()))
-        super(CFR, self).__init__(game, all_players)
+        super(DeepCFR, self).__init__(game, all_players)
         self.n_players = n_players       
         self.game = game
 
@@ -48,6 +48,12 @@ class CFR(policy.Policy):
                 where each card is represented as an integer
                 )
         """
+        if str(self.game) == "kuhn_poker()" or str(self.game) == "leduc_poker()":
+            print("kuhn string triggered", str(self.game))
+            return state.information_state_string(current_player)
+
+
+
         state_str = state.information_state_string(current_player)
 
 
@@ -89,13 +95,15 @@ class CFR(policy.Policy):
         bet_features = [int(state_info["Round"]), int(state_info["Pot"]), stacks[current_player], stacks[1 - current_player]]
 
         key = np.array(hole_cards + board_cards + bet_features, dtype=np.int32)
+        
+        #Is this really necessary? -> doing it because I wanted a string representation of state, and this was most efficient
         return key.tobytes()
 
-    def _get_info_set(self, info_set_key, legal_actions) -> InfoSet:
+    def _get_info_set(self, info_set_key, legal_actions) -> DeepInfoSet:
         """
         Returns the information set I for the current player at a given state.
         """
-        return InfoSet(info_set_key, legal_actions)
+        return DeepInfoSet(info_set_key, legal_actions)
 
    
     def traverse(self, state: pyspiel.State, i: int, theta_1: DeepCFRModel, theta_2: DeepCFRModel,
@@ -248,6 +256,7 @@ class CFR(policy.Policy):
                 action = random.choices(list(I.strategy.keys()), weights=I.strategy.values(), k=1)[0]
 
 
+            # print("Going to next state from end of func")
             return self.traverse(state.child(action), i, theta_1, theta_2, M_v, M_pi, t+1)
 
     
@@ -262,7 +271,9 @@ class CFR(policy.Policy):
         '''
         #Create the infoset object
         key = self.get_info_set_key(state, state.current_player())
-        key = key = np.frombuffer(key, dtype=np.int32)
+        if not isinstance(key, str):
+            key = key = np.frombuffer(key, dtype=np.int32)
+        
         I = self._get_info_set(key, state.legal_actions())
 
         strategy_network = self.policy
@@ -298,9 +309,17 @@ class CFR(policy.Policy):
             some action samples from the possible states
         '''
         pdf = self.action_probabilities(state)
-        print(f"pdf {pdf}")
+
+        probability_sum = sum([val for val in pdf.values()])
+
+        for action in pdf:
+            pdf[action] = pdf[action]/probability_sum
+        # print(f"pdf {pdf}")
         values = list(pdf.keys())
         probabilities = [pdf[key] for key in values]
+
+        #Normalize to reduce errors from happening
+
 
         # Sample from the dictionary
         action = random.choices(values, weights=probabilities, k=1) 
@@ -308,6 +327,7 @@ class CFR(policy.Policy):
 
 
     def compute_exploitability(self):
+        # .game will return 
         return exploitability(game=self.game, policy = policy.tabular_policy_from_callable(self.game, self.action_probabilities))
     
     def _train_strategy_network(self, strategy_mem: MemoryReservoir, verbose = False) -> DeepCFRModel:
@@ -370,7 +390,6 @@ class CFR(policy.Policy):
         K is the number of traversals per player per iteration
         '''
 
-        log_every = iterations/log_every
         # NOTE: in the paper, they set the memory size to 40 million
         advantage_mem_1 = MemoryReservoir(max_size=MEM_SIZE)
         advantage_mem_2 = MemoryReservoir(max_size=MEM_SIZE)
@@ -451,18 +470,11 @@ class CFR(policy.Policy):
                             theta_1=adv_network_1, theta_2=adv_network_2, M_v=advantage_mem_2, M_pi=strategy_mem, t=1
                         )
 
-        self.policy = self._train_strategy_network(strategy_mem=strategy_mem, verbose=True)
+        self.policy = self._train_strategy_network(strategy_mem=strategy_mem, verbose=False)
 
     def save(self, model_path='./cfr_model.pth'):
         ''' Save model
         '''
-        # Get the directory from the save_path
-        directory = os.path.dirname(model_path)
-        
-        # Check if the directory exists; if not, create it
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-            print(f"Directory created at: {directory}")
         
         # Save the model weights
         torch.save(self.policy.state_dict(), model_path)
@@ -484,3 +496,14 @@ class CFR(policy.Policy):
 
         self.policy = strategy_network
         
+
+if __name__ == "__main__":
+    # Test the exploitability calculation
+    game = pyspiel.load_game("kuhn_poker")
+    print(str(game))
+    agent = DEEP_CFR(game = game)
+    print(type(agent.game))
+
+    agent.train()
+    #This won't be defined until you call train()
+    agent.compute_exploitability()
